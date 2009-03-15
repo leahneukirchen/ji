@@ -137,53 +137,24 @@ class Ji
       else
         res.write HEADER
         Post.overview.each { |post|
-          p "foo"
-          res.write <<EOF
-<div class="post#{post.moderated ? " moderated" : ""}" id="p#{post.id}">
-<div class="content">
-  #{post.content}
-</div>
-<div class="actions">
-  <span class="date">#{post.posted}</span>
-  <span class="trip">#{post.tripcode}</span>
-  <a href="#{post.id}"><b>#{post.id}</b></a>
-</div>
-</div>
-EOF
+          res.write Post.render_thread(post, [])
         }
-        res.write <<EOF
-<hr>
-<p>Start new thread:</p>
-<form class="reply" method="POST" action="/" >
-<textarea name="content" cols=79 rows=15></textarea>
-trip: <input type="text" name="tripcode">
-<input type="submit" value="new thread">
-</form>
-EOF
+        res.write "<hr>"
+        res.write post_form("Start new thread:", "/", "new thread")
       end
-    when %r{\A/(\d+)\z}
+    when %r{\A/(\d+)\z}         # (sub)thread
       if req.post?
         new_post = Post[$1].reply(req["content"], req["tripcode"])
         res["Location"] = "/#{new_post.thread}#p#{new_post.id}"
         res.status = 302
       else                      # GET
         res.write HEADER
-
         if req.query_string == "reply"
-        res.write <<EOF
-<hr>
-<p>Reply:</p>
-<form class="reply" method="POST" action="/#{$1}" >
-<textarea name="content" cols=79 rows=15></textarea>
-trip: <input type="text" name="tripcode">
-<input type="submit" value="reply">
-</form>
-EOF
+          res.write post_form("Reply:", "/#{$1}", "reply")
         end
-
         res.write Post.render(Integer($1))
       end
-    when %r{\A/moderate/(\d+)\z}
+    when %r{\A/moderate/(\d+)\z} # moderation
       p = Post[$1]
       p.moderated = !p.moderated
       res["Location"] = "/#{p.thread}"
