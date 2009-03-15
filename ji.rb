@@ -59,13 +59,17 @@ class Post < DBI::Model(:posts)
     treeize[root]
   end
 
-  def render(id, maxdepth=nil)
+  def render(id, user=nil, reply=true)
     post, children = thread(id)
-    render_thread(post, children)
+
+    moderate = user && post.parent.nil? && post.tripcode == user.last_trip
+    render_thread(post, children, 0, reply, moderate)
   end
 
-  def render_thread(post, children, depth=0)
+  def render_thread(post, children, depth=0, reply=true, moderate=false)
     children = children.sort_by { |p, cs| p.order }
+    modlink = %{<a class="moderate" href="/moderate/#{post.id}">!</a>}  if moderate
+    replylink = %{<a class="replylink" href="#{post.id}?reply">reply</a>}  if reply
 
     return <<EOF
 <li class="post#{post.moderated ? " moderated" : ""}" id="p#{post.id}">
@@ -76,12 +80,12 @@ class Post < DBI::Model(:posts)
   <span class="date">#{post.posted}</span>
   <span class="trip">#{post.tripcode}</span>
   <a href="#{post.id}"><b>#{post.id}</b></a>
-  <a class="replylink" href="#{post.id}?reply">reply</a>
-  <a class="moderate" href="/moderate/#{post.id}">!</a>
+  #{replylink}
+  #{modlink}
 </div>
 <ul class="children">
 #{
-  children.map{ |p, cs| render_thread(p, cs, depth+1) }.join("\n")
+  children.map{ |p, cs| render_thread(p, cs, depth+1, reply, moderate) }.join("\n")
 }
 </ul>
 </li>
@@ -226,7 +230,9 @@ EOF
         res.write HEADER
         res.write '<ul id="main">'
         Post.overview.each { |post|
-          res.write Post.render_thread(post, [])
+          size = DBH.sc("SELECT count(id) FROM posts WHERE thread = ?", post.thread).to_i
+          res.write Post.render_thread(post, [], 0, nil, false).sub(
+                                                                    "</div>", %Q{<a href="#{post.thread}">#{size-1} more...</a></div>})
         }
         res.write '</ul>'
         res.write "<hr>"
@@ -248,7 +254,7 @@ EOF
           res.write post_form("Reply:", "/#{$1}", "reply")
         end
         res.write '<ul id="main">'
-        res.write Post.render(Integer($1))
+        res.write Post.render(Integer($1), user)
         res.write '</ul>'
       end
     when %r{\A/moderate/(\d+)\z} # moderation
