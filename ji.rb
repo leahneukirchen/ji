@@ -25,7 +25,7 @@ class Post < DBI::Model(:posts)
   class << self
 
   def overview(start=0)
-    Post.where("parent IS NULL ORDER BY updated LIMIT 10 OFFSET ?", start)
+    Post.where("parent IS NULL ORDER BY updated DESC LIMIT 10 OFFSET ?", start)
   end
 
   def post(text, tripcode)
