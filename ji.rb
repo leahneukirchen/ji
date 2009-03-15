@@ -93,13 +93,13 @@ EOF
   end
 
   def markup(str)
-    str.split(/\n+/).map { |para|
+    str.split(/\n\n+/).map { |para|
       if para =~ /\A(>+) /
         "<blockquote>" * ($1.size) + 
           Rack::Utils.escape_html($') +
           "</blockquote>" * ($1.size)
       else
-        Rack::Utils.escape_html(para)
+        "<p>" + Rack::Utils.escape_html(para) + "</p>"
       end
     }.join
   end
