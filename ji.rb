@@ -85,15 +85,22 @@ EOF
   end
 
   def reply(text, tripcode)
-    post = Post.create(:content => text,
-                       :tripcode => self.class.trip(tripcode),
-                       :parent => id,
-                       :thread => thread)
+    if text == "" && tripcode == "bump"
+      post = self
+      post.updated = Time.now
+    else
+      post = Post.create(:content => text,
+                         :tripcode => self.class.trip(tripcode),
+                         :parent => id,
+                         :thread => thread)
+    end
+
     parent = Post[post.parent]
     while parent
       parent.updated = post.updated
       parent = Post[parent.parent]
     end
+
     post
   end
 
