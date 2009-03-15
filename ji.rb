@@ -21,6 +21,19 @@ CREATE TABLE posts (
 SQL
 end
 
+unless DBH.tables.include?("ips")
+  DBH.do <<SQL
+CREATE TABLE ips (
+  id INTEGER PRIMARY KEY,
+  banned BOOLEAN default 0,
+  last_post DATETIME default "1970-01-01 00:00:00",
+  last_bump DATETIME default "1970-01-01 00:00:00",
+  last_thread DATETIME default "1970-01-01 00:00:00",
+  last_trip TEXT
+);
+SQL
+end
+
 class Post < DBI::Model(:posts)
   class << self
 
@@ -28,8 +41,9 @@ class Post < DBI::Model(:posts)
     Post.where("parent IS NULL ORDER BY updated DESC LIMIT 10 OFFSET ?", start)
   end
 
-  def post(text, tripcode)
+  def post(text, tripcode, user)
     n = Post.create(:content => text, :tripcode => trip(tripcode))
+    user.last_trip = trip(tripcode)  unless trip(tripcode).empty?
     n.thread = n.id
     n
   end
@@ -84,15 +98,25 @@ EOF
 
   end
 
-  def reply(text, tripcode)
-    if text == "" && tripcode == "bump"
-      post = self
-      post.updated = Time.now
+  def reply(text, tripcode, user)
+    if text == ""
+      if tripcode == "bump"
+        if user.can_bump?
+          post = self
+          post.updated = Time.now
+          user.bumped  
+        end
+      else
+        user.last_trip = trip(tripcode)  unless trip(tripcode).empty?
+        return self
+      end
     else
       post = Post.create(:content => text,
-                         :tripcode => self.class.trip(tripcode),
+                         :tripcode => trip(tripcode),
                          :parent => id,
                          :thread => thread)
+      user.last_trip = trip(tripcode)  unless trip(tripcode).empty?
+      user.posted
     end
 
     parent = Post[post.parent]
@@ -104,16 +128,46 @@ EOF
     post
   end
 
-  def moderate
-    self.moderated = true
+  def trip(str)
+    self.class.trip(str)
   end
 
-  def unmoderate
-    self.moderated = false
+  def moderate(user)
+    root = Post[thread]
+    if root.tripcode == user.last_trip
+      self.moderated = !self.moderated
+    end
   end
 
   def order
     [moderated ? 1 : 0, -Time.parse(updated).to_i]
+  end
+end
+
+class User < DBI::Model(:ips)
+  def can_post?
+    (Time.now - Time.parse(last_post)) > 1*60
+  end
+
+  def posted
+    self.last_post = Time.now
+  end
+
+  def can_thread?
+    p [Time.now, last_thread, self]
+    (Time.now - Time.parse(last_thread)) > 15*60
+  end
+
+  def posted_thread
+    self.last_thread = Time.now
+  end
+
+  def can_bump?
+    (Time.now - Time.parse(last_bump)) > 2*60*60
+  end
+
+  def bumped
+    self.last_bump = Time.now
   end
 end
 
@@ -135,12 +189,27 @@ EOF
     req = Rack::Request.new(env)
     res = Rack::Response.new
 
+    numeric_ip = env["REMOTE_ADDR"].split(".").inject(0) { |a,e| a<<8 | e.to_i }
+    user = User[numeric_ip] || User.create(:id => numeric_ip)
+
+    if user.banned
+      res.status = 404
+      res.write "You are banned."
+      return res.finish
+    end
+
     case req.path_info
     when "/"                    # overview
       if req.post?
-        new_post = Post.post(req["content"], req["tripcode"])
-        res["Location"] = "/#{new_post.id}"
-        res.status = 302
+        if user.can_thread?
+          new_post = Post.post(req["content"], req["tripcode"], user)
+          user.posted_thread
+          res["Location"] = "/#{new_post.id}"
+          res.status = 302
+        else
+          res.status = 403
+          res.write "You cannot yet make another new thread."
+        end
       else
         res.write HEADER
         res.write '<ul id="main">'
@@ -153,9 +222,14 @@ EOF
       end
     when %r{\A/(\d+)\z}         # (sub)thread
       if req.post?
-        new_post = Post[$1].reply(req["content"], req["tripcode"])
-        res["Location"] = "/#{new_post.thread}#p#{new_post.id}"
-        res.status = 302
+        if user.can_post? || req["tripcode"] == ""
+          new_post = Post[$1].reply(req["content"], req["tripcode"], user)
+          res["Location"] = "/#{new_post.thread}#p#{new_post.id}"
+          res.status = 302
+        else
+          res.status = 403
+          res.write "You cannot yet post again."
+        end
       else                      # GET
         res.write HEADER
         if req.query_string == "reply"
@@ -167,7 +241,7 @@ EOF
       end
     when %r{\A/moderate/(\d+)\z} # moderation
       p = Post[$1]
-      p.moderated = !p.moderated
+      p.moderate(user)
       res["Location"] = "/#{p.thread}"
       res.status = 302
     else
