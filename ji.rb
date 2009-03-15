@@ -271,22 +271,22 @@ body {
   padding-left: 6em;
 }
 
-.moderated .content, .moderated .actions {
+.moderated > .content, .moderated > .actions {
   font-size: 8pt;
   background-color: #fff;
 }
 
-.moderated .content {
+.moderated > .content {
   border: 1px solid #ddd;
   height: 1em;
   overflow: hidden;
 }
 
-.moderated.open .content {
+.moderated.open > .content {
   height: auto;
 }
 
-.selected .content {
+.selected > .content {
   outline: 2px solid #aaa;
 }
 
