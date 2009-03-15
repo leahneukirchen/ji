@@ -70,7 +70,7 @@ class Post < DBI::Model(:posts)
     return <<EOF
 <li class="post#{post.moderated ? " moderated" : ""}" id="p#{post.id}">
 <div class="content">
-  #{post.content}
+  #{markup post.content.to_s}
 </div>
 <div class="actions">
   <span class="date">#{post.posted}</span>
@@ -86,6 +86,18 @@ class Post < DBI::Model(:posts)
 </ul>
 </li>
 EOF
+  end
+
+  def markup(str)
+    str.split(/\n+/).map { |para|
+      if para =~ /\A(>+) /
+        "<blockquote>" * ($1.size) + 
+          Rack::Utils.escape_html($') +
+          "</blockquote>" * ($1.size)
+      else
+        Rack::Utils.escape_html(para)
+      end
+    }.join
   end
 
   def trip(tripcode, secret="jijijijijiji")
@@ -298,6 +310,14 @@ body {
 }
 .content p + p {
   margin: 1em 0 0 0;
+}
+
+.content blockquote {
+  margin-left: 2em;
+}
+
+.content > blockquote {
+  color: #777;
 }
 
 .actions {
