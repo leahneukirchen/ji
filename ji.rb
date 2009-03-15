@@ -4,7 +4,7 @@ require 'time'
 require 'm4dbi'
 require 'rack'
 
-DBH = DBI.connect("DBI:sqlite3:db.sqlite")
+DBH = DBI.connect("DBI:SQLite3:db.sqlite")
 
 unless DBH.tables.include?("posts")
   DBH.do <<SQL
