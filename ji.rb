@@ -161,6 +161,19 @@ EOF
         res.status = 302
       else                      # GET
         res.write HEADER
+
+        if req.query_string == "reply"
+        res.write <<EOF
+<hr>
+<p>Reply:</p>
+<form class="reply" method="POST" action="/#{$1}" >
+<textarea name="content" cols=79 rows=15></textarea>
+trip: <input type="text" name="tripcode">
+<input type="submit" value="reply">
+</form>
+EOF
+        end
+
         res.write Post.render(Integer($1))
       end
     when %r{\A/moderate/(\d+)\z}
