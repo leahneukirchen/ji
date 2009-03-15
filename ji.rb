@@ -45,8 +45,9 @@ class Post < DBI::Model(:posts)
     treeize[root]
   end
 
-  def render(id)
-    render_thread(*thread(id))
+  def render(id, maxdepth=nil)
+    post, children = thread(id)
+    render_thread(post, children)
   end
 
   def render_thread(post, children, depth=0)
@@ -117,19 +118,26 @@ EOF
   end
 end
 
-# GET / -> main
-# GET /id -> thread
-# POST /id
-
 class Ji
   HEADER = DATA.read
 
+  def post_form(description, url, button)
+    return <<EOF
+<p>#{description}</p>
+<form class="reply" method="POST" action="#{url}" >
+<textarea name="content" cols=79 rows=15></textarea>
+trip: <input type="text" name="tripcode">
+<input type="submit" value="#{button}">
+</form>
+EOF
+  end
+  
   def call(env)
     req = Rack::Request.new(env)
     res = Rack::Response.new
 
     case req.path_info
-    when "/"
+    when "/"                    # overview
       if req.post?
         new_post = Post.post(req["content"], req["tripcode"])
         res["Location"] = "/#{new_post.id}"
