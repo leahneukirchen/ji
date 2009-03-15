@@ -53,9 +53,8 @@ class Post < DBI::Model(:posts)
   def render_thread(post, children, depth=0)
     children = children.sort_by { |p, cs| p.order }
 
-    maintag = depth == 0 ? "div" : "li"
     return <<EOF
-<#{maintag} class="post#{post.moderated ? " moderated" : ""}" id="p#{post.id}">
+<li class="post#{post.moderated ? " moderated" : ""}" id="p#{post.id}">
 <div class="content">
   #{post.content}
 </div>
@@ -71,7 +70,7 @@ class Post < DBI::Model(:posts)
   children.map{ |p, cs| render_thread(p, cs, depth+1) }.join("\n")
 }
 </ul>
-</#{maintag}>
+</li>
 EOF
   end
 
@@ -144,9 +143,11 @@ EOF
         res.status = 302
       else
         res.write HEADER
+        res.write '<ul id="main">'
         Post.overview.each { |post|
           res.write Post.render_thread(post, [])
         }
+        res.write '</ul>'
         res.write "<hr>"
         res.write post_form("Start new thread:", "/", "new thread")
       end
@@ -160,7 +161,9 @@ EOF
         if req.query_string == "reply"
           res.write post_form("Reply:", "/#{$1}", "reply")
         end
+        res.write '<ul id="main">'
         res.write Post.render(Integer($1))
+        res.write '</ul>'
       end
     when %r{\A/moderate/(\d+)\z} # moderation
       p = Post[$1]
@@ -186,6 +189,12 @@ body {
   background-color: #fff;
   color: #000;
   margin: 2em 3em;
+}
+
+#main {
+  list-style-type: none;
+  margin: 0 0 2em 0;
+  padding: 0;
 }
 
 .nav {
