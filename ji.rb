@@ -93,13 +93,23 @@ EOF
   end
 
   def markup(str)
-    str.split(/\n\n+/).map { |para|
+    str.gsub("\r\n", "\n").split(/\n\n+/).map { |para|
       if para =~ /\A(>+) /
         "<blockquote>" * ($1.size) + 
           Rack::Utils.escape_html($') +
           "</blockquote>" * ($1.size)
       else
-        "<p>" + Rack::Utils.escape_html(para) + "</p>"
+        body = Rack::Utils.escape_html(para)
+        body.gsub!(%r{((?:http://|www\.).*?)(\s|$)}) {
+          url = $1
+          case url
+          when /\.(png|jpe?g|gif)\z/
+            %Q{<a rel="nofollow" href="#{url}"><img src="#{url}"></a> }
+          else
+            %Q{<a rel="nofollow" href="#{url}">#{url}</a> }
+          end
+        }
+        "<p>#{body}</p>"
       end
     }.join
   end
@@ -324,6 +334,10 @@ body {
 
 .content > blockquote {
   color: #777;
+}
+
+.content img {
+  max-width: 100%;
 }
 
 .actions {
