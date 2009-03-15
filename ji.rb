@@ -35,12 +35,9 @@ class Post < DBI::Model(:posts)
   end
 
   def thread(id)
-    posts = Post.where(:thread => id)
+    root = Post[id]
+    posts = Post.where(:thread => root.thread)
 
-    return [Post[id], []]  if posts.empty?     # XXX show full subthread
-
-    root = posts.find { |p| p.parent == nil }
-    
     treeize = lambda { |r|
       [r, posts.find_all { |p| p.parent == r.id }.map { |p| treeize[p] }]
     }
@@ -52,10 +49,10 @@ class Post < DBI::Model(:posts)
     render_thread(*thread(id))
   end
 
-  def render_thread(post, children)
+  def render_thread(post, children, depth=0)
     children = children.sort_by { |p, cs| p.order }
 
-    maintag = post.parent ? "li" : "div"
+    maintag = depth == 0 ? "div" : "li"
     return <<EOF
 <#{maintag} class="post#{post.moderated ? " moderated" : ""}" id="p#{post.id}">
 <div class="content">
@@ -70,7 +67,7 @@ class Post < DBI::Model(:posts)
 </div>
 <ul class="children">
 #{
-  children.map{ |p| render_thread(*p) }.join("\n")
+  children.map{ |p, cs| render_thread(p, cs, depth+1) }.join("\n")
 }
 </ul>
 </#{maintag}>
