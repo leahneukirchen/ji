@@ -34,6 +34,8 @@ body {
 .post, .reply {
   clear: both;
   margin-top: 1em;
+  min-width: 25em;
+  max-width: 60em;
 }
 
 .content {
