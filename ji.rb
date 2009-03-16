@@ -200,8 +200,8 @@ EOF
 
       def post(text, tripcode, user)
         n = Post.create(:content => text, :tripcode => trip(tripcode))
-        user.last_trip = tripcode
         n.thread = n.id
+        user.last_trip = tripcode
         n
       end
 
@@ -349,6 +349,17 @@ EOF
       case req.path_info
       when "/"                    # overview
         res.write HEADER
+        res.write <<EOF
+<div class="nav">
+  <form method="POST" action="/login">
+    trip: <input type="password" name="tripcode" value="">
+    <input type="submit" value="log in">
+  </form>
+  <form method="POST" action="/logout">
+    <input type="submit" value="log out">
+  </form>
+</div>
+EOF
         res.write Overview.new(user).to_html
         res.write "<hr>"
         res.write post_form("Start new thread:", "/", "new thread")
@@ -374,6 +385,16 @@ EOF
         res.write "You are banned."
       else
         case req.path_info
+
+        when "/logout"
+          res.delete_cookie "tripcode"
+          res.redirect "/"
+          return res.finish
+
+        when "/login"
+          user.last_trip = req["tripcode"]
+          res.redirect "/"
+
         when "/"                    # overview
           if user.can_thread?
             new_post = Post.post(req["content"], req["tripcode"], user)
@@ -420,7 +441,7 @@ body {
   font: 11pt/1.33 sans-serif;
   background-color: #fff;
   color: #000;
-  margin: 2em 3em;
+  margin: 3em;
 }
 
 #main {
@@ -433,6 +454,10 @@ body {
   float: right;
   list-style-type: none;
   margin: -2em 0.5em 1.5em 0;
+}
+
+.nav form {
+  display: inline;
 }
 
 .nav li {
