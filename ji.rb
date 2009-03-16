@@ -84,6 +84,8 @@ SQL
     end
 
     def render_thread(root=@root, children=@children)
+      children = children.sort_by { |p, cs| p.order }
+
       r = ""
       r << %Q{<li class="post#{moderated(root)}">}
       r << render_post(root)
