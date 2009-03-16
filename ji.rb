@@ -20,6 +20,21 @@ class Ji
          Digest::SHA256.digest("root" + "\0" + SECRET1)
         ]
 
+  class << self
+    def halftrip(tripcode)
+      Digest::SHA256.digest(tripcode + "\0" + SECRET1)
+    end
+    
+    def fulltrip(halftrip)
+      [Digest::SHA256.digest(halftrip + "\0" + SECRET2)].
+        pack("m*")[0..TRIP_LENGTH]
+    end
+    
+    def trip(tripcode)
+      fulltrip(halftrip(tripcode))
+    end
+  end
+
   DBH = DBI.connect("DBI:SQLite3:db.sqlite")
 
   unless DBH.tables.include?("posts")
@@ -103,7 +118,7 @@ EOF
     end
 
     def mod_link(post)
-      if @user.can_moderate?(post)
+      if @root && @user.can_moderate?(@root)
         %{<a class="moderate" href="/moderate/#{post.id}">!</a>} 
       else
         ""
@@ -205,9 +220,7 @@ EOF
         if tripcode.to_s.empty?
           ""
         else
-          halftrip = Digest::SHA256.digest(tripcode + "\0" + SECRET1)
-          [Digest::SHA256.digest(halftrip + "\0" + SECRET2)].
-            pack("m*")[0..TRIP_LENGTH]
+          Ji.trip(tripcode)
         end
       end
 
@@ -295,7 +308,7 @@ EOF
 
     def last_trip=(trip)
       if trip && !trip.empty?
-        @last_trip = Digest::SHA256.digest(trip + "\0" + SECRET1)
+        @last_trip = Ji.halftrip(trip)
       end
     end
 
@@ -305,12 +318,11 @@ EOF
 
     def tripped?(trip)
       return false  unless @last_trip  
-      [Digest::SHA256.digest(@last_trip + "\0" + SECRET2)].
-        pack("m*")[0..TRIP_LENGTH] == trip
+      Ji.fulltrip(@last_trip) == trip
     end
 
     def can_moderate?(post)
-      tripped?(post.tripcode) || Post::OPS.include?(@last_trip)
+      tripped?(post.tripcode) || OPS.include?(@last_trip)
     end
   end
 
