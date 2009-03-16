@@ -19,7 +19,7 @@ class Ji
          Digest::SHA256.digest("root" + "\0" + SECRET1)
         ]
 
-  HEADER = File.read("header.inc").gsub("$TITLE", "/b – Random")
+  HEADER = File.read("header.inc").gsub("$TITLE", %{<a href="/">/b – Random</a>})
   FOOTER = File.read("footer.inc")
 
   TRIP_LENGTH = 16
