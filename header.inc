@@ -88,7 +88,7 @@ body {
 }
 
 .actions .date {
-  font-size: 8pt;
+  color: #555;
 }
 
 .children {
