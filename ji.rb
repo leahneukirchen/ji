@@ -241,6 +241,12 @@ class Post < DBI::Model(:posts)
 end
 
 class User < DBI::Model(:ips)
+  def self.from(env)
+    numeric_ip = (env["HTTP_X_FORWARDED_FOR"] || env["REMOTE_ADDR"]).
+      split(".").inject(0) { |a,e| a<<8 | e.to_i }
+    User[numeric_ip] || User.create(:id => numeric_ip)
+  end
+
   def can_post?
     (Time.now - Time.parse(last_post)) > 1*60
   end
@@ -266,6 +272,13 @@ class User < DBI::Model(:ips)
   end
 end
 
+class Rack::Response
+  def redirect(location)
+    self.status = 302
+    self["Location"] = location
+  end
+end
+
 class Ji
   HEADER = DATA.read
 
@@ -284,57 +297,60 @@ EOF
     req = Rack::Request.new(env)
     res = Rack::Response.new
 
-    numeric_ip = env["REMOTE_ADDR"].split(".").inject(0) { |a,e| a<<8 | e.to_i }
-    user = User[numeric_ip] || User.create(:id => numeric_ip)
+    user = User.from(env)
 
-    if user.banned
-      res.status = 404
-      res.write "You are banned."
-      return res.finish
-    end
-
-    case req.path_info
-    when "/"                    # overview
-      if req.post?
-        if user.can_thread?
-          new_post = Post.post(req["content"], req["tripcode"], user)
-          user.posted_thread
-          res["Location"] = "/#{new_post.id}"
-          res.status = 302
-        else
-          res.status = 403
-          res.write "You cannot yet make another new thread."
-        end
-      else
+    if req.get?
+      case req.path_info
+      when "/"                    # overview
         res.write HEADER
         res.write Overview.new(user).to_html
         res.write "<hr>"
         res.write post_form("Start new thread:", "/", "new thread")
-      end
-    when %r{\A/(\d+)\z}         # (sub)thread
-      if req.post?
-        if user.can_post? || req["tripcode"] == ""
-          new_post = Post[$1].reply(req["content"], req["tripcode"], user)
-          res["Location"] = "/#{new_post.thread}#p#{new_post.id}"
-          res.status = 302
-        else
-          res.status = 403
-          res.write "You cannot yet post again."
-        end
-      else                      # GET
+        
+      when %r{\A/(\d+)\z}         # (sub)thread
         res.write HEADER
         if req.query_string == "reply"
           res.write post_form("Reply:", "/#{$1}", "reply")
         end
         res.write FullThread.new(user, Integer($1)).to_html
+
+      when %r{\A/moderate/(\d+)\z} # moderation
+        p = Post[$1]
+        p.moderate(user)
+        res.redirect "/#{p.thread}"
+
+      else
+        res.status = 404
       end
-    when %r{\A/moderate/(\d+)\z} # moderation
-      p = Post[$1]
-      p.moderate(user)
-      res["Location"] = "/#{p.thread}"
-      res.status = 302
-    else
-      res.status = 404
+    elsif req.post?
+      if user.banned
+        res.status = 403
+        res.write "You are banned."
+      else
+        case req.path_info
+        when "/"                    # overview
+          if user.can_thread?
+            new_post = Post.post(req["content"], req["tripcode"], user)
+            user.posted_thread
+            res.redirect "/#{new_post.id}"
+          else
+            res.status = 403
+            res.write "You cannot yet make another new thread."
+          end
+
+        when %r{\A/(\d+)\z}         # (sub)thread
+          if user.can_post? || req["body"] == ""
+            new_post = Post[$1].reply(req["content"], req["tripcode"], user)
+            res.redirect "/#{new_post.thread}#p#{new_post.id}"
+          else
+            res.status = 403
+            res.write "You cannot yet post again."
+          end
+
+        else
+          res.status = 404
+        end
+      end
     end
 
     res.finish
