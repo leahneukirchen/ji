@@ -59,7 +59,7 @@ SQL
     
     def fulltrip(halftrip)
       [Digest::SHA256.digest(halftrip + "\0" + SECRET2)].
-        pack("m*")[0..TRIP_LENGTH]
+        pack("m*")[0, TRIP_LENGTH]
     end
     
     def trip(tripcode)
@@ -106,12 +106,21 @@ SQL
 </div>
 <div class="actions">
   <span class="date">#{post.posted}</span>
-  <span class="trip">#{post.tripcode}</span>
+  #{trip(post)}
   <a href="#{post.id}"><b>#{post.id}</b></a>
   #{reply_link(post)}
   #{mod_link(post)}
 </div>
 EOF
+    end
+
+    def trip(post)
+      if post.tripcode && !post.tripcode.empty?
+        hash = post.tripcode.unpack("m*")[0].gsub(/./mn) { |c| "%02x" % c[0].to_s }
+        %Q{<span class="trip" style="background: url(http://www.gravatar.com/avatar/#{hash}?d=identicon&f=1&s=24)" title="#{post.tripcode}">#{post.tripcode}</span>}
+      else
+        ""
+      end
     end
 
     def reply_link(post)

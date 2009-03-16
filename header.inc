@@ -85,6 +85,12 @@ body {
 
 .actions .trip {
   font-style: italic;
+  width: 12px;
+  height: 12px;
+  overflow: hidden;
+  display: inline-block;
+  color: none;
+  font-size: 100px;
 }
 
 .actions .date {
