@@ -14,27 +14,15 @@ end
 class Ji
   SECRET1 = "jijijijijiji"      # CHANGE THIS
   SECRET2 = "kekekekekeke"      # CHANGE THIS
-  TRIP_LENGTH = 16
   OPS = [
          # CHANGE THIS
          Digest::SHA256.digest("root" + "\0" + SECRET1)
         ]
 
-  class << self
-    def halftrip(tripcode)
-      Digest::SHA256.digest(tripcode + "\0" + SECRET1)
-    end
-    
-    def fulltrip(halftrip)
-      [Digest::SHA256.digest(halftrip + "\0" + SECRET2)].
-        pack("m*")[0..TRIP_LENGTH]
-    end
-    
-    def trip(tripcode)
-      fulltrip(halftrip(tripcode))
-    end
-  end
+  HEADER = File.read("header.inc").gsub("$TITLE", "/b – Random")
+  FOOTER = File.read("footer.inc")
 
+  TRIP_LENGTH = 16
   DBH = DBI.connect("DBI:SQLite3:db.sqlite")
 
   unless DBH.tables.include?("posts")
@@ -64,6 +52,21 @@ CREATE TABLE ips (
 SQL
   end
 
+  class << self
+    def halftrip(tripcode)
+      Digest::SHA256.digest(tripcode + "\0" + SECRET1)
+    end
+    
+    def fulltrip(halftrip)
+      [Digest::SHA256.digest(halftrip + "\0" + SECRET2)].
+        pack("m*")[0..TRIP_LENGTH]
+    end
+    
+    def trip(tripcode)
+      fulltrip(halftrip(tripcode))
+    end
+  end
+
   class Presenter
     def initialize(user)
       @user = user
@@ -82,6 +85,7 @@ SQL
 
     def render_thread(root=@root, children=@children)
       r = ""
+      r << %Q{<li class="post#{moderated(root)}">}
       r << render_post(root)
       r << %Q{<ul class="children">}
       children.each { |post, cs|
@@ -90,6 +94,7 @@ SQL
         r << %Q{</li>}
       }
       r << %Q{</ul>}
+      r << %Q{</li>}
       r
     end
 
@@ -326,8 +331,6 @@ EOF
     end
   end
 
-  HEADER = DATA.read
-
   def post_form(description, url, button)
     return <<EOF
 <p>#{description}</p>
@@ -363,6 +366,7 @@ EOF
         res.write Overview.new(user).to_html
         res.write "<hr>"
         res.write post_form("Start new thread:", "/", "new thread")
+        res.write FOOTER
 
       when %r{\A/(\d+)\z}         # (sub)thread
         res.write HEADER
@@ -370,6 +374,7 @@ EOF
           res.write post_form("Reply:", "/#{$1}", "reply")
         end
         res.write FullThread.new(user, Integer($1)).to_html
+        res.write FOOTER
 
       when %r{\A/moderate/(\d+)\z} # moderation
         p = Post[$1]
@@ -432,155 +437,3 @@ EOF
 end
 
 Rack::Handler::WEBrick.run(Ji.new, :Port => 9999)
-
-__END__
-<meta charset=utf-8>
-
-<style>
-body {
-  font: 11pt/1.33 sans-serif;
-  background-color: #fff;
-  color: #000;
-  margin: 3em;
-}
-
-#main {
-  list-style-type: none;
-  margin: 0 0 2em 0;
-  padding: 0;
-}
-
-.nav {
-  float: right;
-  list-style-type: none;
-  margin: -2em 0.5em 1.5em 0;
-}
-
-.nav form {
-  display: inline;
-}
-
-.nav li {
-  display: inline;
-}
-
-.post, .reply {
-  clear: both;
-  margin-top: 1em;
-}
-
-.content {
-  background-color: #ddd;
-  padding: 7pt;
-  padding-bottom: 1.5em;
-}
-
-.content p {
-  padding: 0;
-  margin: 0;
-}
-.content p + p {
-  margin: 1em 0 0 0;
-}
-
-.content blockquote {
-  margin-left: 2em;
-}
-
-.content > blockquote {
-  color: #777;
-}
-
-.content img {
-  max-width: 100%;
-}
-
-.actions {
-  text-align: right;
-  position: relative;
-  top: -1.5em;
-  margin-right: 0.5em;
-  background-color: #ddd;
-  display: inline;
-  float: right;
-}
-
-.actions a {
-  font-weight: bold;
-  text-decoration: none;
-}
-
-.actions a b {
-  color: black;
-}
-
-.actions .trip {
-  font-style: italic;
-}
-
-.actions .date {
-  font-size: 8pt;
-}
-
-.children {
-  flush: both;
-  list-style-type: none;
-  padding-left: 6em;
-}
-
-.moderated > .content, .moderated > .actions {
-  font-size: 8pt;
-  background-color: #fff;
-}
-
-.moderated > .content {
-  border: 1px solid #ddd;
-  height: 1em;
-  overflow: hidden;
-}
-
-.moderated.open > .content {
-  height: auto;
-}
-
-.selected > .content {
-  outline: 2px solid #aaa;
-}
-
-.reply textarea {
-  width: 100%;
-  margin-bottom: 0.5em;
-  font: 11pt/1.33 sans-serif;
-}
-
-.reply input {
-  margin-left: 0.5em;
-}
-
-.reply {
-  text-align: right;
-}
-</style>
-
-<script src="http://ajax.googleapis.com/ajax/libs/jquery/1.3/jquery.min.js"></script>
-<script>
-jQuery(function($) {
-  $(".moderated .content").toggle(function() {
-    $(this).parent().addClass("open")
-  }, function() {
-    $(this).parent().removeClass("open")
-  })
-
-  $("a.replylink").click(function() {
-    $(".reply:has(textarea:empty)").remove()
-    $(this).parent().siblings(".children").prepend($('<li><form class="reply" method="POST" action="' + $(this).attr("href") + '" >\
-<textarea name="content" cols=79 rows=15></textarea>\
-trip: <input type="password" name="tripcode">\
-<input type="submit" value="reply">\
-</form></li>'))
-    return false;
-  })
-
-  $(document.location.hash).addClass("selected")
-})
-</script>
