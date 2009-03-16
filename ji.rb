@@ -4,6 +4,22 @@ require 'time'
 require 'm4dbi'
 require 'rack'
 
+class Rack::Response
+  def redirect(location)
+    self.status = 302
+    self["Location"] = location
+  end
+end
+
+class Ji
+  SECRET1 = "jijijijijiji"      # CHANGE THIS
+  SECRET2 = "kekekekekeke"      # CHANGE THIS
+  TRIP_LENGTH = 16
+  OPS = [
+         # CHANGE THIS
+         Digest::SHA256.digest("root" + "\0" + SECRET1)
+        ]
+
 DBH = DBI.connect("DBI:SQLite3:db.sqlite")
 
 unless DBH.tables.include?("posts")
@@ -28,8 +44,7 @@ CREATE TABLE ips (
   banned BOOLEAN default 0,
   last_post DATETIME default "1970-01-01 00:00:00",
   last_bump DATETIME default "1970-01-01 00:00:00",
-  last_thread DATETIME default "1970-01-01 00:00:00",
-  last_trip TEXT
+  last_thread DATETIME default "1970-01-01 00:00:00"
 );
 SQL
 end
@@ -86,7 +101,7 @@ EOF
   end
 
   def mod_link(post)
-    if @user && @root && @root.tripcode == @user.last_trip
+    if @user.can_moderate?(post)
       %{<a class="moderate" href="/moderate/#{post.id}">!</a>} 
     else
       ""
@@ -164,11 +179,18 @@ class FullThread < Presenter
 end
 
 class Post < DBI::Model(:posts)
+  SECRET1 = "jijijijijiji"
+  SECRET2 = "kekekekekeke"
+  TRIP_LENGTH = 16
+  OPS = [
+         Digest::SHA256.digest("root" + "\0" + SECRET1)
+        ]
+
   class << self
 
   def post(text, tripcode, user)
     n = Post.create(:content => text, :tripcode => trip(tripcode))
-    user.last_trip = trip(tripcode)  unless trip(tripcode).empty?
+    user.last_trip = tripcode
     n.thread = n.id
     n
   end
@@ -184,11 +206,13 @@ class Post < DBI::Model(:posts)
     treeize[root]
   end
 
-  def trip(tripcode, secret="jijijijijiji")
+  def trip(tripcode)
     if tripcode.to_s.empty?
       ""
     else
-      [Digest::SHA256.digest(tripcode + "\0" + secret)].pack("m*")[0..16]
+      halftrip = Digest::SHA256.digest(tripcode + "\0" + SECRET1)
+      [Digest::SHA256.digest(halftrip + "\0" + SECRET2)].
+        pack("m*")[0..TRIP_LENGTH]
     end
   end
 
@@ -203,7 +227,7 @@ class Post < DBI::Model(:posts)
           user.bumped  
         end
       else
-        user.last_trip = trip(tripcode)  unless trip(tripcode).empty?
+        user.last_trip = tripcode
         return self
       end
     else
@@ -211,7 +235,7 @@ class Post < DBI::Model(:posts)
                          :tripcode => trip(tripcode),
                          :parent => id,
                          :thread => thread)
-      user.last_trip = trip(tripcode)  unless trip(tripcode).empty?
+      user.last_trip = tripcode
       user.posted
     end
 
@@ -230,7 +254,7 @@ class Post < DBI::Model(:posts)
 
   def moderate(user)
     root = Post[thread]
-    if root.tripcode == user.last_trip
+    if user.can_moderate?(root)
       self.moderated = !self.moderated
     end
   end
@@ -244,7 +268,10 @@ class User < DBI::Model(:ips)
   def self.from(env)
     numeric_ip = (env["HTTP_X_FORWARDED_FOR"] || env["REMOTE_ADDR"]).
       split(".").inject(0) { |a,e| a<<8 | e.to_i }
-    User[numeric_ip] || User.create(:id => numeric_ip)
+    user = User[numeric_ip] || User.create(:id => numeric_ip)
+    r = Rack::Request.new(env)
+    user.instance_variable_set :@last_trip, r.cookies["tripcode"]
+    user
   end
 
   def can_post?
@@ -270,16 +297,29 @@ class User < DBI::Model(:ips)
   def bumped
     self.last_bump = Time.now
   end
-end
 
-class Rack::Response
-  def redirect(location)
-    self.status = 302
-    self["Location"] = location
+  def last_trip=(trip)
+    if trip && !trip.empty?
+      @last_trip = Digest::SHA256.digest(trip + "\0" + Post::SECRET1)
+      p @last_trip
+    end
+  end
+
+  def half_trip
+    @last_trip
+  end
+
+  def tripped?(trip)
+    return false  unless @last_trip  
+    [Digest::SHA256.digest(@last_trip + "\0" + Post::SECRET2)].
+      pack("m*")[0..Post::TRIP_LENGTH] == trip
+  end
+
+  def can_moderate?(post)
+    tripped?(post.tripcode) || Post::OPS.include?(@last_trip)
   end
 end
 
-class Ji
   HEADER = DATA.read
 
   def post_form(description, url, button)
@@ -287,7 +327,7 @@ class Ji
 <p>#{description}</p>
 <form class="reply" method="POST" action="#{url}" >
 <textarea name="content" cols=79 rows=15></textarea>
-trip: <input type="text" name="tripcode">
+trip: <input type="password" name="tripcode">
 <input type="submit" value="#{button}">
 </form>
 EOF
@@ -350,12 +390,20 @@ EOF
         else
           res.status = 404
         end
+
+        if user.half_trip
+          res.set_cookie("tripcode",
+                         {:expires => Time.now + 24*60*60,
+                           :httponly => true,
+                           :value => user.half_trip})
+        end
       end
     end
 
     res.finish
   end
 end
+
 
 Rack::Handler::WEBrick.run(Ji.new, :Port => 9999)
 
@@ -497,7 +545,7 @@ jQuery(function($) {
     $(".reply:has(textarea:empty)").remove()
     $(this).parent().siblings(".children").prepend($('<li><form class="reply" method="POST" action="' + $(this).attr("href") + '" >\
 <textarea name="content" cols=79 rows=15></textarea>\
-trip: <input type="text" name="tripcode">\
+trip: <input type="password" name="tripcode">\
 <input type="submit" value="reply">\
 </form></li>'))
     return false;
