@@ -73,7 +73,7 @@ SQL
     end
 
     def render_posts(posts=@posts)
-      r = %Q{<ul id="main"}
+      r = %Q{<ul id="main">}
       posts.each { |post|
         r << %Q{<li class="post#{moderated(post)}">}
         r << render_post(post)
@@ -87,13 +87,11 @@ SQL
       children = children.sort_by { |p, cs| p.order }
 
       r = ""
-      r << %Q{<li class="post#{moderated(root)}">}
+      r << %Q{<li class="post#{moderated(root)}" id="p#{root.id}">}
       r << render_post(root)
       r << %Q{<ul class="children">}
       children.each { |post, cs|
-        r << %Q{<li class="post#{moderated(post)}">}
         r << render_thread(post, cs)
-        r << %Q{</li>}
       }
       r << %Q{</ul>}
       r << %Q{</li>}
@@ -109,7 +107,7 @@ SQL
 <div class="actions">
   <span class="date">#{post.posted}</span>
   #{trip(post)}
-  <a href="#{post.id}"><b>#{post.id}</b></a>
+  #{permalink(post)}
   #{reply_link(post)}
   #{mod_link(post)}
 </div>
@@ -139,6 +137,10 @@ EOF
       else
         ""
       end
+    end
+
+    def permalink(post)
+      %Q{<a href="#{post.id}"><b>#{post.id}</b></a>}
     end
 
     def reply

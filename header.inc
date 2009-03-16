@@ -67,7 +67,7 @@ body {
 .actions {
   text-align: right;
   position: relative;
-  top: -1.5em;
+  top: -1.55em;
   margin-right: 0.5em;
   background-color: #ddd;
   display: inline;
