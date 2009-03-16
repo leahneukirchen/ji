@@ -173,7 +173,7 @@ EOF
     end
 
     def to_html
-      @posts = Post.where("parent IS NULL ORDER BY updated DESC
+      @posts = Post.where("parent IS NULL ORDER BY moderated, updated DESC
                                         LIMIT ? OFFSET ?", @items, @start)
       render_posts
     end
