@@ -20,10 +20,10 @@ class Ji
          Digest::SHA256.digest("root" + "\0" + SECRET1)
         ]
 
-DBH = DBI.connect("DBI:SQLite3:db.sqlite")
+  DBH = DBI.connect("DBI:SQLite3:db.sqlite")
 
-unless DBH.tables.include?("posts")
-  DBH.do <<SQL
+  unless DBH.tables.include?("posts")
+    DBH.do <<SQL
 CREATE TABLE posts (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   content TEXT,
@@ -35,10 +35,10 @@ CREATE TABLE posts (
   thread INTEGER default ROWID
 );
 SQL
-end
+  end
 
-unless DBH.tables.include?("ips")
-  DBH.do <<SQL
+  unless DBH.tables.include?("ips")
+    DBH.do <<SQL
 CREATE TABLE ips (
   id INTEGER PRIMARY KEY,
   banned BOOLEAN default 0,
@@ -47,39 +47,39 @@ CREATE TABLE ips (
   last_thread DATETIME default "1970-01-01 00:00:00"
 );
 SQL
-end
-
-class Presenter
-  def initialize(user)
-    @user = user
   end
 
-  def render_posts(posts=@posts)
-    r = %Q{<ul id="main"}
-    posts.each { |post|
-      r << %Q{<li class="post#{moderated(post)}">}
-      r << render_post(post)
-      r << %Q{</li>}
-    }
-    r << %Q{</ul>}
-    r
-  end
+  class Presenter
+    def initialize(user)
+      @user = user
+    end
 
-  def render_thread(root=@root, children=@children)
-    r = ""
-    r << render_post(root)
-    r << %Q{<ul class="children">}
-    children.each { |post, cs|
-      r << %Q{<li class="post#{moderated(post)}">}
-      r << render_thread(post, cs)
-      r << %Q{</li>}
-    }
-    r << %Q{</ul>}
-    r
-  end
+    def render_posts(posts=@posts)
+      r = %Q{<ul id="main"}
+      posts.each { |post|
+        r << %Q{<li class="post#{moderated(post)}">}
+        r << render_post(post)
+        r << %Q{</li>}
+      }
+      r << %Q{</ul>}
+      r
+    end
 
-  def render_post(post)
-    return <<EOF
+    def render_thread(root=@root, children=@children)
+      r = ""
+      r << render_post(root)
+      r << %Q{<ul class="children">}
+      children.each { |post, cs|
+        r << %Q{<li class="post#{moderated(post)}">}
+        r << render_thread(post, cs)
+        r << %Q{</li>}
+      }
+      r << %Q{</ul>}
+      r
+    end
+
+    def render_post(post)
+      return <<EOF
 <div class="content">
   #{markup post.content.to_s}
   #{extra(post)}
@@ -92,233 +92,227 @@ class Presenter
   #{mod_link(post)}
 </div>
 EOF
-  end
-
-  def reply_link(post)
-    if reply
-      %{<a class="replylink" href="#{post.id}?reply">reply</a>} 
     end
-  end
 
-  def mod_link(post)
-    if @user.can_moderate?(post)
-      %{<a class="moderate" href="/moderate/#{post.id}">!</a>} 
-    else
-      ""
-    end
-  end
-
-  def reply
-    true
-  end
-
-  def extra(post)
-    ""
-  end
-
-  def markup(str)
-    str.gsub("\r\n", "\n").split(/\n\n+/).map { |para|
-      if para =~ /\A(>+) /
-        "<blockquote>" * ($1.size) + 
-          Rack::Utils.escape_html($') +
-          "</blockquote>" * ($1.size)
+    def reply_link(post)
+      if reply
+        %{<a class="replylink" href="#{post.id}?reply">reply</a>} 
       else
-        body = Rack::Utils.escape_html(para)
-        body.gsub!(%r{((?:http://|www\.).*?)(\s|$)}) {
-          url = $1
-          case url
-          when /\.(png|jpe?g|gif)\z/
-            %Q{<a rel="nofollow" href="#{url}"><img src="#{url}"></a> }
-          else
-            %Q{<a rel="nofollow" href="#{url}">#{url}</a> }
-          end
-        }
-        "<p>#{body}</p>"
+        ""
       end
-    }.join
-  end
+    end
 
-  def moderated(post)
-    post.moderated ? " moderated" : ""
-  end
-end
+    def mod_link(post)
+      if @user.can_moderate?(post)
+        %{<a class="moderate" href="/moderate/#{post.id}">!</a>} 
+      else
+        ""
+      end
+    end
 
-class Overview < Presenter
-  def initialize(user, start=0, items=10)
-    super user
-    @start = start
-    @items = items
-  end
+    def reply
+      true
+    end
 
-  def to_html
-    @posts = Post.where("parent IS NULL ORDER BY updated DESC
-                                        LIMIT ? OFFSET ?", @items, @start)
-    render_posts
-  end
-
-  def reply
-    false
-  end
-
-  def extra(post)
-    size = DBH.sc("SELECT count(id) FROM posts WHERE thread = ?", post.thread).to_i
-    %Q{<a href="#{post.thread}">#{size-1} more...</a></div>}
-  end
-end
-
-class FullThread < Presenter
-  def initialize(user, id)
-    super user
-    @id = id
-  end
-  
-  def to_html
-    @root, @children = Post.thread(@id)
-    %Q{<ul id="main">} + render_thread + "</ul>"
-  end
-end
-
-class Post < DBI::Model(:posts)
-  SECRET1 = "jijijijijiji"
-  SECRET2 = "kekekekekeke"
-  TRIP_LENGTH = 16
-  OPS = [
-         Digest::SHA256.digest("root" + "\0" + SECRET1)
-        ]
-
-  class << self
-
-  def post(text, tripcode, user)
-    n = Post.create(:content => text, :tripcode => trip(tripcode))
-    user.last_trip = tripcode
-    n.thread = n.id
-    n
-  end
-
-  def thread(id)
-    root = Post[id]
-    posts = Post.where(:thread => root.thread)
-
-    treeize = lambda { |r|
-      [r, posts.find_all { |p| p.parent == r.id }.map { |p| treeize[p] }]
-    }
-
-    treeize[root]
-  end
-
-  def trip(tripcode)
-    if tripcode.to_s.empty?
+    def extra(post)
       ""
-    else
-      halftrip = Digest::SHA256.digest(tripcode + "\0" + SECRET1)
-      [Digest::SHA256.digest(halftrip + "\0" + SECRET2)].
-        pack("m*")[0..TRIP_LENGTH]
+    end
+
+    def markup(str)
+      str.gsub("\r\n", "\n").split(/\n\n+/).map { |para|
+        if para =~ /\A(>+) /
+          "<blockquote>" * ($1.size) + 
+            Rack::Utils.escape_html($') +
+            "</blockquote>" * ($1.size)
+        else
+          body = Rack::Utils.escape_html(para)
+          body.gsub!(%r{((?:http://|www\.).*?)(\s|$)}) {
+            url = $1
+            case url
+            when /\.(png|jpe?g|gif)\z/
+              %Q{<a rel="nofollow" href="#{url}"><img src="#{url}"></a> }
+            else
+              %Q{<a rel="nofollow" href="#{url}">#{url}</a> }
+            end
+          }
+          "<p>#{body}</p>"
+        end
+      }.join
+    end
+
+    def moderated(post)
+      post.moderated ? " moderated" : ""
     end
   end
 
+  class Overview < Presenter
+    def initialize(user, start=0, items=10)
+      super user
+      @start = start
+      @items = items
+    end
+
+    def to_html
+      @posts = Post.where("parent IS NULL ORDER BY updated DESC
+                                        LIMIT ? OFFSET ?", @items, @start)
+      render_posts
+    end
+
+    def reply
+      false
+    end
+
+    def extra(post)
+      size = DBH.sc("SELECT count(id) FROM posts WHERE thread = ?", post.thread).to_i
+      %Q{<a href="#{post.thread}">#{size-1} more...</a></div>}
+    end
   end
 
-  def reply(text, tripcode, user)
-    if text == ""
-      if tripcode == "bump"
-        if user.can_bump?
-          post = self
-          post.updated = Time.now
-          user.bumped  
+  class FullThread < Presenter
+    def initialize(user, id)
+      super user
+      @id = id
+    end
+
+    def to_html
+      @root, @children = Post.thread(@id)
+      %Q{<ul id="main">} + render_thread + "</ul>"
+    end
+  end
+
+  class Post < DBI::Model(:posts)
+    class << self
+
+      def post(text, tripcode, user)
+        n = Post.create(:content => text, :tripcode => trip(tripcode))
+        user.last_trip = tripcode
+        n.thread = n.id
+        n
+      end
+
+      def thread(id)
+        root = Post[id]
+        posts = Post.where(:thread => root.thread)
+
+        treeize = lambda { |r|
+          [r, posts.find_all { |p| p.parent == r.id }.map { |p| treeize[p] }]
+        }
+
+        treeize[root]
+      end
+
+      def trip(tripcode)
+        if tripcode.to_s.empty?
+          ""
+        else
+          halftrip = Digest::SHA256.digest(tripcode + "\0" + SECRET1)
+          [Digest::SHA256.digest(halftrip + "\0" + SECRET2)].
+            pack("m*")[0..TRIP_LENGTH]
+        end
+      end
+
+    end
+
+    def reply(text, tripcode, user)
+      if text == ""
+        if tripcode == "bump"
+          if user.can_bump?
+            post = self
+            post.updated = Time.now
+            user.bumped  
+          end
+        else
+          user.last_trip = tripcode
+          return self
         end
       else
+        post = Post.create(:content => text,
+                           :tripcode => trip(tripcode),
+                           :parent => id,
+                           :thread => thread)
         user.last_trip = tripcode
-        return self
+        user.posted
       end
-    else
-      post = Post.create(:content => text,
-                         :tripcode => trip(tripcode),
-                         :parent => id,
-                         :thread => thread)
-      user.last_trip = tripcode
-      user.posted
+
+      parent = Post[post.parent]
+      while parent
+        parent.updated = post.updated
+        parent = Post[parent.parent]
+      end
+
+      post
     end
 
-    parent = Post[post.parent]
-    while parent
-      parent.updated = post.updated
-      parent = Post[parent.parent]
+    def trip(str)
+      self.class.trip(str)
     end
 
-    post
-  end
+    def moderate(user)
+      root = Post[thread]
+      if user.can_moderate?(root)
+        self.moderated = !self.moderated
+      end
+    end
 
-  def trip(str)
-    self.class.trip(str)
-  end
-
-  def moderate(user)
-    root = Post[thread]
-    if user.can_moderate?(root)
-      self.moderated = !self.moderated
+    def order
+      [moderated ? 1 : 0, -Time.parse(updated).to_i]
     end
   end
 
-  def order
-    [moderated ? 1 : 0, -Time.parse(updated).to_i]
-  end
-end
+  class User < DBI::Model(:ips)
+    def self.from(env)
+      numeric_ip = (env["HTTP_X_FORWARDED_FOR"] || env["REMOTE_ADDR"]).
+        split(".").inject(0) { |a,e| a<<8 | e.to_i }
+      user = User[numeric_ip] || User.create(:id => numeric_ip)
+      r = Rack::Request.new(env)
+      user.instance_variable_set :@last_trip, r.cookies["tripcode"]
+      user
+    end
 
-class User < DBI::Model(:ips)
-  def self.from(env)
-    numeric_ip = (env["HTTP_X_FORWARDED_FOR"] || env["REMOTE_ADDR"]).
-      split(".").inject(0) { |a,e| a<<8 | e.to_i }
-    user = User[numeric_ip] || User.create(:id => numeric_ip)
-    r = Rack::Request.new(env)
-    user.instance_variable_set :@last_trip, r.cookies["tripcode"]
-    user
-  end
+    def can_post?
+      (Time.now - Time.parse(last_post)) > 1*60
+    end
 
-  def can_post?
-    (Time.now - Time.parse(last_post)) > 1*60
-  end
+    def posted
+      self.last_post = Time.now
+    end
 
-  def posted
-    self.last_post = Time.now
-  end
+    def can_thread?
+      (Time.now - Time.parse(last_thread)) > 15*60
+    end
 
-  def can_thread?
-    (Time.now - Time.parse(last_thread)) > 15*60
-  end
+    def posted_thread
+      self.last_thread = Time.now
+    end
 
-  def posted_thread
-    self.last_thread = Time.now
-  end
+    def can_bump?
+      (Time.now - Time.parse(last_bump)) > 2*60*60
+    end
 
-  def can_bump?
-    (Time.now - Time.parse(last_bump)) > 2*60*60
-  end
+    def bumped
+      self.last_bump = Time.now
+    end
 
-  def bumped
-    self.last_bump = Time.now
-  end
+    def last_trip=(trip)
+      if trip && !trip.empty?
+        @last_trip = Digest::SHA256.digest(trip + "\0" + SECRET1)
+      end
+    end
 
-  def last_trip=(trip)
-    if trip && !trip.empty?
-      @last_trip = Digest::SHA256.digest(trip + "\0" + Post::SECRET1)
-      p @last_trip
+    def half_trip
+      @last_trip
+    end
+
+    def tripped?(trip)
+      return false  unless @last_trip  
+      [Digest::SHA256.digest(@last_trip + "\0" + SECRET2)].
+        pack("m*")[0..TRIP_LENGTH] == trip
+    end
+
+    def can_moderate?(post)
+      tripped?(post.tripcode) || Post::OPS.include?(@last_trip)
     end
   end
-
-  def half_trip
-    @last_trip
-  end
-
-  def tripped?(trip)
-    return false  unless @last_trip  
-    [Digest::SHA256.digest(@last_trip + "\0" + Post::SECRET2)].
-      pack("m*")[0..Post::TRIP_LENGTH] == trip
-  end
-
-  def can_moderate?(post)
-    tripped?(post.tripcode) || Post::OPS.include?(@last_trip)
-  end
-end
 
   HEADER = DATA.read
 
@@ -332,7 +326,7 @@ trip: <input type="password" name="tripcode">
 </form>
 EOF
   end
-  
+
   def call(env)
     req = Rack::Request.new(env)
     res = Rack::Response.new
@@ -346,7 +340,7 @@ EOF
         res.write Overview.new(user).to_html
         res.write "<hr>"
         res.write post_form("Start new thread:", "/", "new thread")
-        
+
       when %r{\A/(\d+)\z}         # (sub)thread
         res.write HEADER
         if req.query_string == "reply"
@@ -394,8 +388,8 @@ EOF
         if user.half_trip
           res.set_cookie("tripcode",
                          {:expires => Time.now + 24*60*60,
-                           :httponly => true,
-                           :value => user.half_trip})
+                          :httponly => true,
+                          :value => user.half_trip})
         end
       end
     end
@@ -403,7 +397,6 @@ EOF
     res.finish
   end
 end
-
 
 Rack::Handler::WEBrick.run(Ji.new, :Port => 9999)
 
