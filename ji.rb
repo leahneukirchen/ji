@@ -219,7 +219,7 @@ EOF
         r << render_post(post)
         r << %Q{<ul class="children">}
 
-        children = Post.where("parent = ? ORDER BY moderated, posted DESC
+        children = Post.where("thread = ? ORDER BY moderated, posted DESC
                                            LIMIT 3", post.id)
         children.reverse_each { |child|
           r << %Q{<li class="post#{moderated(child)}" id="p#{child.id}">}
