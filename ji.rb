@@ -34,62 +34,71 @@ CREATE TABLE ips (
 SQL
 end
 
-class Post < DBI::Model(:posts)
-  class << self
-
-  def overview(start=0)
-    Post.where("parent IS NULL ORDER BY updated DESC LIMIT 10 OFFSET ?", start)
+class Presenter
+  def initialize(user)
+    @user = user
   end
 
-  def post(text, tripcode, user)
-    n = Post.create(:content => text, :tripcode => trip(tripcode))
-    user.last_trip = trip(tripcode)  unless trip(tripcode).empty?
-    n.thread = n.id
-    n
-  end
-
-  def thread(id)
-    root = Post[id]
-    posts = Post.where(:thread => root.thread)
-
-    treeize = lambda { |r|
-      [r, posts.find_all { |p| p.parent == r.id }.map { |p| treeize[p] }]
+  def render_posts(posts=@posts)
+    r = %Q{<ul id="main"}
+    posts.each { |post|
+      r << %Q{<li class="post#{moderated(post)}">}
+      r << render_post(post)
+      r << %Q{</li>}
     }
-
-    treeize[root]
+    r << %Q{</ul>}
+    r
   end
 
-  def render(id, user=nil, reply=true)
-    post, children = thread(id)
-
-    moderate = user && post.parent.nil? && post.tripcode == user.last_trip
-    render_thread(post, children, 0, reply, moderate)
+  def render_thread(root=@root, children=@children)
+    r = ""
+    r << render_post(root)
+    r << %Q{<ul class="children">}
+    children.each { |post, cs|
+      r << %Q{<li class="post#{moderated(post)}">}
+      r << render_thread(post, cs)
+      r << %Q{</li>}
+    }
+    r << %Q{</ul>}
+    r
   end
 
-  def render_thread(post, children, depth=0, reply=true, moderate=false)
-    children = children.sort_by { |p, cs| p.order }
-    modlink = %{<a class="moderate" href="/moderate/#{post.id}">!</a>}  if moderate
-    replylink = %{<a class="replylink" href="#{post.id}?reply">reply</a>}  if reply
-
+  def render_post(post)
     return <<EOF
-<li class="post#{post.moderated ? " moderated" : ""}" id="p#{post.id}">
 <div class="content">
   #{markup post.content.to_s}
+  #{extra(post)}
 </div>
 <div class="actions">
   <span class="date">#{post.posted}</span>
   <span class="trip">#{post.tripcode}</span>
   <a href="#{post.id}"><b>#{post.id}</b></a>
-  #{replylink}
-  #{modlink}
+  #{reply_link(post)}
+  #{mod_link(post)}
 </div>
-<ul class="children">
-#{
-  children.map{ |p, cs| render_thread(p, cs, depth+1, reply, moderate) }.join("\n")
-}
-</ul>
-</li>
 EOF
+  end
+
+  def reply_link(post)
+    if reply
+      %{<a class="replylink" href="#{post.id}?reply">reply</a>} 
+    end
+  end
+
+  def mod_link(post)
+    if @user && @root && @root.tripcode == @user.last_trip
+      %{<a class="moderate" href="/moderate/#{post.id}">!</a>} 
+    else
+      ""
+    end
+  end
+
+  def reply
+    true
+  end
+
+  def extra(post)
+    ""
   end
 
   def markup(str)
@@ -112,6 +121,67 @@ EOF
         "<p>#{body}</p>"
       end
     }.join
+  end
+
+  def moderated(post)
+    post.moderated ? " moderated" : ""
+  end
+end
+
+class Overview < Presenter
+  def initialize(user, start=0, items=10)
+    super user
+    @start = start
+    @items = items
+  end
+
+  def to_html
+    @posts = Post.where("parent IS NULL ORDER BY updated DESC
+                                        LIMIT ? OFFSET ?", @items, @start)
+    render_posts
+  end
+
+  def reply
+    false
+  end
+
+  def extra(post)
+    size = DBH.sc("SELECT count(id) FROM posts WHERE thread = ?", post.thread).to_i
+    %Q{<a href="#{post.thread}">#{size-1} more...</a></div>}
+  end
+end
+
+class FullThread < Presenter
+  def initialize(user, id)
+    super user
+    @id = id
+  end
+  
+  def to_html
+    @root, @children = Post.thread(@id)
+    %Q{<ul id="main">} + render_thread + "</ul>"
+  end
+end
+
+class Post < DBI::Model(:posts)
+  class << self
+
+  def post(text, tripcode, user)
+    n = Post.create(:content => text, :tripcode => trip(tripcode))
+    user.last_trip = trip(tripcode)  unless trip(tripcode).empty?
+    n.thread = n.id
+    n
+  end
+
+  def thread(id)
+    root = Post[id]
+    posts = Post.where(:thread => root.thread)
+
+    treeize = lambda { |r|
+      [r, posts.find_all { |p| p.parent == r.id }.map { |p| treeize[p] }]
+    }
+
+    treeize[root]
   end
 
   def trip(tripcode, secret="jijijijijiji")
@@ -180,7 +250,6 @@ class User < DBI::Model(:ips)
   end
 
   def can_thread?
-    p [Time.now, last_thread, self]
     (Time.now - Time.parse(last_thread)) > 15*60
   end
 
@@ -238,13 +307,7 @@ EOF
         end
       else
         res.write HEADER
-        res.write '<ul id="main">'
-        Post.overview.each { |post|
-          size = DBH.sc("SELECT count(id) FROM posts WHERE thread = ?", post.thread).to_i
-          res.write Post.render_thread(post, [], 0, nil, false).sub(
-                                                                    "</div>", %Q{<a href="#{post.thread}">#{size-1} more...</a></div>})
-        }
-        res.write '</ul>'
+        res.write Overview.new(user).to_html
         res.write "<hr>"
         res.write post_form("Start new thread:", "/", "new thread")
       end
@@ -263,9 +326,7 @@ EOF
         if req.query_string == "reply"
           res.write post_form("Reply:", "/#{$1}", "reply")
         end
-        res.write '<ul id="main">'
-        res.write Post.render(Integer($1), user)
-        res.write '</ul>'
+        res.write FullThread.new(user, Integer($1)).to_html
       end
     when %r{\A/moderate/(\d+)\z} # moderation
       p = Post[$1]
