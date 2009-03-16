@@ -201,6 +201,51 @@ EOF
     end
   end
 
+  class OverviewWithLatest < Presenter
+    def initialize(user, start=0, items=10, latest=3)
+      super user
+      @start = start
+      @items = items
+      @latest = latest
+    end
+
+    def to_html
+      posts = Post.where("parent IS NULL ORDER BY moderated, updated DESC
+                                         LIMIT ? OFFSET ?", @items, @start)
+
+      r = %Q{<ul id="main">}
+      posts.each { |post|
+        r << %Q{<li class="post#{moderated(post)}" id="p#{post.id}">}
+        r << render_post(post)
+        r << %Q{<ul class="children">}
+
+        children = Post.where("parent = ? ORDER BY moderated, posted DESC
+                                           LIMIT 3", post.id)
+        children.reverse_each { |child|
+          r << %Q{<li class="post#{moderated(child)}" id="p#{child.id}">}
+          r << render_post(child)
+          r << %Q{</li>}
+        }
+
+        size = DBH.sc("SELECT count(id) FROM posts WHERE thread = ?", post.thread).to_i
+        r << %Q{<li><a href="#{post.thread}">#{size} total...</a></div></li>}
+
+        r << %Q{</ul>}
+        r << %Q{</li>}
+      }
+      r << %Q{</ul>}
+      r
+    end
+
+    def reply
+      false
+    end
+
+    def permalink(post)
+      %Q{<a href="/#{post.thread}#p#{post.id}"><b>#{post.id}</b></a>}
+    end
+  end
+
   class FullThread < Presenter
     def initialize(user, id)
       super user
@@ -380,6 +425,10 @@ EOF
         res.write "<hr>"
         res.write post_form("Start new thread:", "/", "new thread")
         res.write FOOTER
+
+      when "/latest"
+        res.write HEADER
+        res.write OverviewWithLatest.new(user).to_html
 
       when %r{\A/(\d+)\z}         # (sub)thread
         res.write HEADER
