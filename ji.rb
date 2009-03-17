@@ -220,10 +220,12 @@ EOF
         r << %Q{<ul class="children">}
 
         children = Post.where("thread = ? ORDER BY moderated, posted DESC
-                                           LIMIT 3", post.id)
+                                           LIMIT 5", post.id)
         children.reverse_each { |child|
           r << %Q{<li class="post#{moderated(child)}" id="p#{child.id}">}
           r << render_post(child)
+          r << %Q{<ul class="children">}
+          r << %Q{</ul>}
           r << %Q{</li>}
         }
 
@@ -235,10 +237,6 @@ EOF
       }
       r << %Q{</ul>}
       r
-    end
-
-    def reply
-      false
     end
 
     def permalink(post)
