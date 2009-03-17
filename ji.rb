@@ -289,7 +289,7 @@ EOF
 
     end
 
-    def reply(text, tripcode, user)
+    def reply(text, tripcode, user, sage)
       if text == ""
         if tripcode == "bump"
           if user.can_bump?
@@ -310,10 +310,12 @@ EOF
         user.posted
       end
 
-      parent = Post[post.parent]
-      while parent
-        parent.updated = post.updated
-        parent = Post[parent.parent]
+      unless sage
+        parent = Post[post.parent]
+        while parent
+          parent.updated = post.updated
+          parent = Post[parent.parent]
+        end
       end
 
       post
@@ -389,12 +391,19 @@ EOF
     end
   end
 
-  def post_form(description, url, button)
+  def post_form(description, url, button, sage=nil)
+    s = if sage.nil?
+          "" 
+        else
+          %Q{<label><input type="checkbox" value="sage" #{sage && " checked"} name="sage"> No bump</label>}
+        end
+
     return <<EOF
 <p>#{description}</p>
 <form class="reply" method="POST" action="#{url}" >
 <textarea name="content" cols=79 rows=15></textarea>
 trip: <input type="password" name="tripcode">
+#{s}
 <input type="submit" value="#{button}">
 </form>
 EOF
@@ -423,7 +432,7 @@ EOF
 EOF
         res.write Overview.new(user).to_html
         res.write "<hr>"
-        res.write post_form("Start new thread:", "/", "new thread")
+        res.write post_form("Start new thread:", "/", "new thread", nil)
         res.write FOOTER
 
       when "/latest"
@@ -433,7 +442,7 @@ EOF
       when %r{\A/(\d+)\z}         # (sub)thread
         res.write HEADER
         if req.query_string == "reply"
-          res.write post_form("Reply:", "/#{$1}", "reply")
+          res.write post_form("Reply:", "/#{$1}", "reply", false)
         end
         res.write FullThread.new(user, Integer($1)).to_html
         res.write FOOTER
@@ -473,8 +482,12 @@ EOF
           end
 
         when %r{\A/(\d+)\z}         # (sub)thread
+          p req.params
           if user.can_post? || req["body"] == ""
-            new_post = Post[$1].reply(req["content"], req["tripcode"], user)
+            new_post = Post[$1].reply(req["content"],
+                                      req["tripcode"],
+                                      user,
+                                      req["sage"] == "sage")
             res.redirect "/#{new_post.thread}#p#{new_post.id}"
           else
             res.status = 403

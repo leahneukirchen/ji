@@ -152,6 +152,7 @@ jQuery(function($) {
     $(this).parent().siblings(".children").prepend($('<li><form class="reply" method="POST" action="' + $(this).attr("href") + '" >\
 <textarea name="content" cols=79 rows=15></textarea>\
 trip: <input type="password" name="tripcode">\
+<label><input type="checkbox" value="sage" #{sage && " checked"} name="sage"> No bump</label>\
 <input type="submit" value="reply">\
 </form></li>'))
     return false;
