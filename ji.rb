@@ -101,8 +101,7 @@ SQL
     def render_post(post)
       return <<EOF
 <div class="content">
-  #{markup post.content.to_s}
-  #{extra(post)}
+  #{content(post)}
 </div>
 <div class="actions">
   <span class="date">#{post.posted}</span>
@@ -112,6 +111,10 @@ SQL
   #{mod_link(post)}
 </div>
 EOF
+    end
+
+    def content(post)
+      markup post.content.to_s
     end
 
     def trip(post)
@@ -145,10 +148,6 @@ EOF
 
     def reply
       true
-    end
-
-    def extra(post)
-      ""
     end
 
     def markup(str)
@@ -195,9 +194,9 @@ EOF
       false
     end
 
-    def extra(post)
+    def content(post)
       size = DBH.sc("SELECT count(id) FROM posts WHERE thread = ?", post.thread).to_i
-      %Q{<a href="#{post.thread}">#{size-1} more...</a></div>}
+      super + %Q{<a href="#{post.thread}">#{size-1} more...</a></div>}
     end
   end
 
@@ -219,8 +218,8 @@ EOF
         r << render_post(post)
         r << %Q{<ul class="children">}
 
-        children = Post.where("thread = ? ORDER BY moderated, posted DESC
-                                           LIMIT 5", post.id)
+        children = Post.where("thread = ? AND PARENT IS NOT NULL
+                              ORDER BY moderated, posted DESC LIMIT 5", post.id)
         children.reverse_each { |child|
           r << %Q{<li class="post#{moderated(child)}" id="p#{child.id}">}
           r << render_post(child)
@@ -228,9 +227,6 @@ EOF
           r << %Q{</ul>}
           r << %Q{</li>}
         }
-
-        size = DBH.sc("SELECT count(id) FROM posts WHERE thread = ?", post.thread).to_i
-        r << %Q{<li><a href="#{post.thread}">#{size} total...</a></div></li>}
 
         r << %Q{</ul>}
         r << %Q{</li>}
@@ -241,6 +237,19 @@ EOF
 
     def permalink(post)
       %Q{<a href="/#{post.thread}#p#{post.id}"><b>#{post.id}</b></a>}
+    end
+
+    def content(post)
+      if post.parent 
+        if post.parent != post.thread
+          %Q{<a href="/#{post.thread}#p#{post.parent}">&gt;&gt; #{post.parent}</a>} + super
+        else
+          super
+        end
+      else
+        size = DBH.sc("SELECT count(id) FROM posts WHERE thread = ?", post.thread).to_i
+        super + %Q{<p>(<a href="#{post.thread}">#{size} total...</a>)</p>}
+      end
     end
   end
 
