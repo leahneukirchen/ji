@@ -218,8 +218,9 @@ EOF
         r << render_post(post)
         r << %Q{<ul class="children">}
 
-        children = Post.where("thread = ? AND PARENT IS NOT NULL
-                              ORDER BY moderated, posted DESC LIMIT 5", post.id)
+        children = Post.where("thread = ? AND moderated = 0
+                                          AND parent IS NOT NULL
+                               ORDER BY posted DESC LIMIT 5", post.id)
         children.reverse_each { |child|
           r << %Q{<li class="post#{moderated(child)}" id="p#{child.id}">}
           r << render_post(child)
