@@ -19,7 +19,7 @@ class Ji
          Digest::SHA256.digest("root" + "\0" + SECRET1)
         ]
 
-  HEADER = File.read("header.inc").gsub("$TITLE", %{<a href="/">/b – Random</a>})
+  HEADER = File.read("header.inc")
   FOOTER = File.read("footer.inc")
 
   TRIP_LENGTH = 16
@@ -35,7 +35,8 @@ CREATE TABLE posts (
   updated DATE default CURRENT_TIMESTAMP,
   moderated BOOLEAN default 0,
   parent INTEGER default NULL,
-  thread INTEGER default ROWID
+  thread INTEGER default ROWID,
+  board TEXT NOT NULL
 );
 SQL
   end
@@ -178,15 +179,23 @@ EOF
   end
 
   class Overview < Presenter
-    def initialize(user, start=0, items=10)
+    def initialize(board, user, start=0, items=10)
       super user
+      @board = board
       @start = start
       @items = items
     end
 
     def to_html
-      @posts = Post.where("parent IS NULL ORDER BY moderated, updated DESC
-                                        LIMIT ? OFFSET ?", @items, @start)
+      if @board
+        @posts = Post.where("parent IS NULL AND board = ? 
+                             ORDER BY moderated, updated DESC
+                             LIMIT ? OFFSET ?", @board, @items, @start)
+      else
+        @posts = Post.where("parent IS NULL ORDER BY moderated, updated DESC
+                             LIMIT ? OFFSET ?", @items, @start)
+      end
+
       render_posts
     end
 
@@ -196,21 +205,34 @@ EOF
 
     def content(post)
       size = DBH.sc("SELECT count(id) FROM posts WHERE thread = ?", post.thread).to_i
-      super + %Q{<a href="#{post.thread}">#{size-1} more...</a></div>}
+      super +
+      if @board.nil?
+        %Q{<b>/#{post.board}</b> }
+      else
+        ""
+      end +
+      %Q{<a href="#{post.thread}">#{size-1} more...</a></div>}
     end
   end
 
   class OverviewWithLatest < Presenter
-    def initialize(user, start=0, items=10, latest=3)
+    def initialize(board, user, start=0, items=10, latest=3)
       super user
+      @board = board
       @start = start
       @items = items
       @latest = latest
     end
 
     def to_html
-      posts = Post.where("parent IS NULL ORDER BY moderated, updated DESC
-                                         LIMIT ? OFFSET ?", @items, @start)
+      if @board
+        posts = Post.where("parent IS NULL AND board = ?
+                            ORDER BY moderated, updated DESC
+                            LIMIT ? OFFSET ?", @board, @items, @start)
+      else
+        posts = Post.where("parent IS NULL ORDER BY moderated, updated DESC
+                            LIMIT ? OFFSET ?", @items, @start)
+      end
 
       r = %Q{<ul id="main">}
       posts.each { |post|
@@ -249,7 +271,7 @@ EOF
         end
       else
         size = DBH.sc("SELECT count(id) FROM posts WHERE thread = ?", post.thread).to_i
-        super + %Q{<p>(<a href="#{post.thread}">#{size} total...</a>)</p>}
+        super + %Q{<p>(<b>/#{post.board}</b> <a href="#{post.thread}">#{size} total...</a>)</p>}
       end
     end
   end
@@ -269,8 +291,11 @@ EOF
   class Post < DBI::Model(:posts)
     class << self
 
-      def post(text, tripcode, user)
-        n = Post.create(:content => text, :tripcode => trip(tripcode))
+      def post(text, tripcode, board, user)
+        p board
+        n = Post.create(:content => text,
+                        :tripcode => trip(tripcode),
+                        :board => board)
         n.thread = n.id
         user.last_trip = tripcode
         n
@@ -313,7 +338,8 @@ EOF
         post = Post.create(:content => text,
                            :tripcode => trip(tripcode),
                            :parent => id,
-                           :thread => thread)
+                           :thread => thread,
+                           :board => Post[id].board)
         user.last_trip = tripcode
         user.posted
       end
@@ -417,6 +443,34 @@ trip: <input type="password" name="tripcode">
 EOF
   end
 
+  class Boards
+    def initialize(boards)
+      @boards = {"/" => Ji.new(nil, "Ji")}
+      boards.each { |name, desc|
+        @boards["/" + name] = Ji.new(name, desc)
+      }
+      @map = Rack::URLMap.new(@boards)
+      p @map
+    end
+
+    def call(env)
+      @map.call(env)
+    end
+  end
+
+  def initialize(board=nil, title="Untitled")
+    @board = board
+    @title = title
+  end
+
+  def header
+    HEADER.gsub("$TITLE", %{<a href="/#{@board}">/#{@board} – #{@title}</a>})
+  end
+
+  def footer
+    FOOTER.gsub("$TITLE", %{<a href="/#{@board}">/#{@board} – #{@title}</a>})
+  end
+
   def call(env)
     req = Rack::Request.new(env)
     res = Rack::Response.new
@@ -425,8 +479,8 @@ EOF
 
     if req.get?
       case req.path_info
-      when "/"                    # overview
-        res.write HEADER
+      when "/", ""                # overview
+        res.write header
         res.write <<EOF
 <div class="nav">
   <form method="POST" action="/login">
@@ -438,22 +492,24 @@ EOF
   </form>
 </div>
 EOF
-        res.write Overview.new(user).to_html
-        res.write "<hr>"
-        res.write post_form("Start new thread:", "/", "new thread", nil)
-        res.write FOOTER
+        res.write Overview.new(@board, user).to_html
+        if @board
+          res.write "<hr>"
+          res.write post_form("Start new thread:", "/#{@board}", "new thread", nil)
+        end
+        res.write footer
 
       when "/latest"
-        res.write HEADER
-        res.write OverviewWithLatest.new(user).to_html
+        res.write header
+        res.write OverviewWithLatest.new(@board, user).to_html
 
       when %r{\A/(\d+)\z}         # (sub)thread
-        res.write HEADER
-        if req.query_string == "reply"
+        res.write header
+        if @board && req.query_string == "reply"
           res.write post_form("Reply:", "/#{$1}", "reply", false)
         end
         res.write FullThread.new(user, Integer($1)).to_html
-        res.write FOOTER
+        res.write footer
 
       when %r{\A/moderate/(\d+)\z} # moderation
         p = Post[$1]
@@ -479,9 +535,9 @@ EOF
           user.last_trip = req["tripcode"]
           res.redirect "/"
 
-        when "/"                    # overview
+        when "/", ""                # overview
           if user.can_thread?
-            new_post = Post.post(req["content"], req["tripcode"], user)
+            new_post = Post.post(req["content"], req["tripcode"], @board, user)
             user.posted_thread
             res.redirect "/#{new_post.id}"
           else
@@ -518,5 +574,3 @@ EOF
     res.finish
   end
 end
-
-Rack::Handler::WEBrick.run(Ji.new, :Port => 9999)
