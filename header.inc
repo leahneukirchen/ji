@@ -20,11 +20,16 @@ body {
 .nav {
   float: right;
   list-style-type: none;
-  margin: -2em 0.5em 1.5em 0;
+  margin: -4em 0.5em 1em 0;
+  clear: both;
 }
 
 .nav form {
   display: inline;
+}
+
+.nav ul {
+  padding-bottom: 2.5em;
 }
 
 .nav li {
@@ -163,3 +168,11 @@ trip: <input type="password" name="tripcode">\
   </head>
   <body>
     <h1>$TITLE</h1>
+
+    <div class="nav">
+      <ul>
+        <li><a href="/" title="Ji">/</a></li>
+        <li><a href="/a" title="Alternative">/a</a></li>
+        <li><a href="/t" title="Testing Ji">/t</a></li>
+      </ul>
+    </div>
