@@ -48,7 +48,7 @@ CREATE TABLE ips (
   banned BOOLEAN default 0,
   last_post DATETIME default "1970-01-01 00:00:00",
   last_bump DATETIME default "1970-01-01 00:00:00",
-  last_thread DATETIME default "1970-01-01 00:00:00"
+  last_reply DATETIME default "1970-01-01 00:00:00"
 );
 SQL
   end
@@ -136,7 +136,7 @@ EOF
     end
 
     def mod_link(post)
-      if @root && @user.can_moderate?(@root)
+      if @root && @user.can_moderate?(post)
         %{<a class="moderate" href="/moderate/#{post.id}">!</a>} 
       else
         ""
@@ -291,13 +291,12 @@ EOF
   class Post < DBI::Model(:posts)
     class << self
 
-      def post(text, tripcode, board, user)
+      def post(text, tripcode, board)
         p board
         n = Post.create(:content => text,
                         :tripcode => trip(tripcode),
                         :board => board)
         n.thread = n.id
-        user.last_trip = tripcode
         n
       end
 
@@ -322,26 +321,19 @@ EOF
 
     end
 
-    def reply(text, tripcode, user, sage)
-      if text == ""
-        if tripcode == "bump"
-          if user.can_bump?
-            post = self
-            post.updated = Time.now
-            user.bumped  
-          end
-        else
-          user.last_trip = tripcode
-          return self
-        end
-      else
+    def reply(text, tripcode, sage)
+      if text != ""
         post = Post.create(:content => text,
                            :tripcode => trip(tripcode),
                            :parent => id,
                            :thread => thread,
                            :board => Post[id].board)
-        user.last_trip = tripcode
-        user.posted
+      else
+        if tripcode == "bump"
+          post = self
+        else
+          raise Forbidden, "No text"
+        end
       end
 
       unless sage
@@ -359,17 +351,17 @@ EOF
       self.class.trip(str)
     end
 
-    def moderate(user)
-      root = Post[thread]
-      if user.can_moderate?(root)
-        self.moderated = !self.moderated
-      end
+    def moderate
+      self.moderated = !self.moderated
     end
 
     def order
       [moderated ? 1 : 0, -Time.parse(updated).to_i]
     end
   end
+
+  class Forbidden < RuntimeError; end
+  class NotFound < RuntimeError; end
 
   class User < DBI::Model(:ips)
     def self.from(env)
@@ -382,23 +374,55 @@ EOF
     end
 
     def can_post?
-      (Time.now - Time.parse(last_post)) > 1*60
+      (Time.now - Time.parse(last_post)) > 5*60
     end
 
     def posted
       self.last_post = Time.now
     end
 
-    def can_thread?
-      (Time.now - Time.parse(last_thread)) > 15*60
+    def post(text, tripcode, board)
+      if user.can_post?
+        new_post = Post.post(text, tripcode, board)
+        self.last_trip = tripcode
+        new_post
+      else
+        raise Forbidden, "You cannot yet make another new thread."
+      end
     end
 
-    def posted_thread
-      self.last_thread = Time.now
+    def can_reply?
+      (Time.now - Time.parse(last_reply)) > 20
+    end
+
+    def posted_reply
+      self.last_reply = Time.now
+    end
+
+    def reply(id, text, tripcode, sage)
+      if can_reply?
+        post = Post[id]
+        self.last_trip = tripcode  if tripcode && tripcode != "bump"
+        
+        if text == "" && tripcode == "bump" 
+          if can_bump?
+            new_post = post.reply(text, tripcode, sage)
+            bumped
+          else
+            new_post = post     # Ignore the bump
+          end
+        else
+          new_post = post.reply(text, tripcode, sage)
+          posted_reply
+        end
+        new_post
+      else
+        raise Forbidden, "You cannot yet post again."
+      end
     end
 
     def can_bump?
-      (Time.now - Time.parse(last_bump)) > 2*60*60
+      (Time.now - Time.parse(last_bump)) > 5*60
     end
 
     def bumped
@@ -421,7 +445,14 @@ EOF
     end
 
     def can_moderate?(post)
-      tripped?(post.tripcode) || OPS.include?(@last_trip)
+      tripped?(Post[post.thread].tripcode) || OPS.include?(@last_trip)
+    end
+
+    def moderate(id)
+      post = Post[id]
+      if can_moderate?(post)
+        post.moderate
+      end
     end
   end
 
@@ -477,11 +508,12 @@ EOF
 
     user = User.from(env)
 
-    if req.get?
-      case req.path_info
-      when "/", ""                # overview
-        res.write header
-        res.write <<EOF
+    begin
+      if req.get?
+        case req.path_info
+        when "/", ""                # overview
+          res.write header
+          res.write <<EOF
 <div class="nav">
   <form method="POST" action="/login">
     trip: <input type="password" name="tripcode" value="">
@@ -492,85 +524,80 @@ EOF
   </form>
 </div>
 EOF
-        res.write Overview.new(@board, user).to_html
-        if @board
-          res.write "<hr>"
-          res.write post_form("Start new thread:", "/#{@board}", "new thread", nil)
-        end
-        res.write footer
-
-      when "/latest"
-        res.write header
-        res.write OverviewWithLatest.new(@board, user).to_html
-
-      when %r{\A/(\d+)\z}         # (sub)thread
-        res.write header
-        if @board && req.query_string == "reply"
-          res.write post_form("Reply:", "/#{$1}", "reply", false)
-        end
-        res.write FullThread.new(user, Integer($1)).to_html
-        res.write footer
-
-      when %r{\A/moderate/(\d+)\z} # moderation
-        p = Post[$1]
-        p.moderate(user)
-        res.redirect "/#{p.thread}"
-
-      else
-        res.status = 404
-      end
-    elsif req.post?
-      if user.banned
-        res.status = 403
-        res.write "You are banned."
-      else
-        case req.path_info
-
-        when "/logout"
-          res.delete_cookie "tripcode"
-          res.redirect "/"
-          return res.finish
-
-        when "/login"
-          user.last_trip = req["tripcode"]
-          res.redirect "/"
-
-        when "/", ""                # overview
-          if user.can_thread?
-            new_post = Post.post(req["content"], req["tripcode"], @board, user)
-            user.posted_thread
-            res.redirect "/#{new_post.id}"
-          else
-            res.status = 403
-            res.write "You cannot yet make another new thread."
+          res.write Overview.new(@board, user).to_html
+          if @board
+            res.write "<hr>"
+            res.write post_form("Start new thread:", "/#{@board}", "new thread", nil)
           end
-
+          res.write footer
+          
+        when "/latest"
+          res.write header
+          res.write OverviewWithLatest.new(@board, user).to_html
+          
         when %r{\A/(\d+)\z}         # (sub)thread
-          p req.params
-          if user.can_post? || req["body"] == ""
-            new_post = Post[$1].reply(req["content"],
-                                      req["tripcode"],
-                                      user,
-                                      req["sage"] == "sage")
-            res.redirect "/#{new_post.thread}#p#{new_post.id}"
-          else
-            res.status = 403
-            res.write "You cannot yet post again."
+          res.write header
+          if @board && req.query_string == "reply"
+            res.write post_form("Reply:", "/#{$1}", "reply", false)
           end
-
+          res.write FullThread.new(user, Integer($1)).to_html
+          res.write footer
+          
+        when %r{\A/moderate/(\d+)\z} # moderation
+          user.moderate($1)
+          p = Post[$1]
+          res.redirect "/#{p.thread}"
+          
         else
-          res.status = 404
+          raise NotFound
         end
-
-        if user.half_trip
-          res.set_cookie("tripcode",
-                         {:expires => Time.now + 24*60*60,
-                          :httponly => true,
-                          :value => user.half_trip})
+      elsif req.post?
+        if user.banned
+          raise Forbidden, "You are banned."
+        else
+          case req.path_info
+            
+          when "/logout"
+            res.delete_cookie "tripcode"
+            res.redirect "/"
+            return res.finish
+            
+          when "/login"
+            user.last_trip = req["tripcode"]
+            res.redirect "/"
+            
+          when "/", ""                # overview
+            new_post = user.post(req["content"], req["tripcode"], @board)
+            res.redirect "/#{new_post.id}"
+            
+          when %r{\A/(\d+)\z}         # (sub)thread
+            new_post = user.reply($1,
+                                  req["content"],
+                                  req["tripcode"],
+                                  req["sage"] == "sage")
+            res.redirect "/#{new_post.thread}#p#{new_post.id}"
+            
+          else
+            raise NotFound
+          end
+          
+          if user.half_trip
+            res.set_cookie("tripcode",
+                           {:expires => Time.now + 24*60*60,
+                             :httponly => true,
+                             :value => user.half_trip})
+          end
         end
       end
-    end
 
+    rescue Forbidden => ex
+      res.status = 403
+      res.write ex.message
+      
+    rescue NotFound => ex
+      res.status = 404
+      
+    end
     res.finish
   end
 end
