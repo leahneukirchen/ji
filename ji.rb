@@ -3,11 +3,16 @@ require 'time'
 
 require 'm4dbi'
 require 'rack'
+require 'htemplate'
 
 class Rack::Response
   def redirect(location)
     self.status = 302
     self["Location"] = location
+  end
+
+  def <<(s)
+    write s
   end
 end
 
@@ -19,11 +24,9 @@ class Ji
          Digest::SHA256.digest("root" + "\0" + SECRET1)
         ]
 
-  HEADER = File.read("header.inc")
-  FOOTER = File.read("footer.inc")
-
   TRIP_LENGTH = 16
   DBH = DBI.connect("DBI:SQLite3:db.sqlite")
+  STYLE = "default"
 
   unless DBH.tables.include?("posts")
     DBH.do <<SQL
@@ -456,24 +459,6 @@ EOF
     end
   end
 
-  def post_form(description, url, button, sage=nil)
-    s = if sage.nil?
-          "" 
-        else
-          %Q{<label><input type="checkbox" value="sage" #{sage && " checked"} name="sage"> No bump</label>}
-        end
-
-    return <<EOF
-<p>#{description}</p>
-<form class="reply" method="POST" action="#{url}" >
-<textarea name="content" cols=79 rows=15></textarea>
-trip: <input type="password" name="tripcode">
-#{s}
-<input type="submit" value="#{button}">
-</form>
-EOF
-  end
-
   class Boards
     def initialize(boards)
       @boards = {"/" => Ji.new(nil, "Ji")}
@@ -489,22 +474,26 @@ EOF
     end
   end
 
+  attr_accessor :board, :title, :view, :req, :res
+
   def initialize(board=nil, title="Untitled")
     @board = board
     @title = title
   end
 
-  def header
-    HEADER.gsub("$TITLE", %{<a href="/#{@board}">/#{@board} – #{@title}</a>})
-  end
-
-  def footer
-    FOOTER.gsub("$TITLE", %{<a href="/#{@board}">/#{@board} – #{@title}</a>})
+  def template(name, view, &block)
+    @view = view
+    HTemplate.new(File.read(File.join("templates", STYLE, "#{name}.ht"))).
+      expand(self, @res, &block)
   end
 
   def call(env)
-    req = Rack::Request.new(env)
-    res = Rack::Response.new
+    dup._call(env)
+  end
+  
+  def _call(env)
+    @req = Rack::Request.new(env)
+    @res = Rack::Response.new
 
     user = User.from(env)
 
@@ -512,36 +501,20 @@ EOF
       if req.get?
         case req.path_info
         when "/", ""                # overview
-          res.write header
-          res.write <<EOF
-<div class="nav">
-  <form method="POST" action="/login">
-    trip: <input type="password" name="tripcode" value="">
-    <input type="submit" value="log in">
-  </form>
-  <form method="POST" action="/logout">
-    <input type="submit" value="log out">
-  </form>
-</div>
-EOF
-          res.write Overview.new(@board, user).to_html
-          if @board
-            res.write "<hr>"
-            res.write post_form("Start new thread:", "/#{@board}", "new thread", nil)
+          template "main", "overview" do
+            Overview.new(@board, user).to_html
           end
-          res.write footer
           
         when "/latest"
-          res.write header
-          res.write OverviewWithLatest.new(@board, user).to_html
+          template "main", "latest" do
+            OverviewWithLatest.new(@board, user).to_html
+          end
           
         when %r{\A/(\d+)\z}         # (sub)thread
-          res.write header
-          if @board && req.query_string == "reply"
-            res.write post_form("Reply:", "/#{$1}", "reply", false)
+          @id = Integer($1)
+          template "main", "thread" do
+            FullThread.new(user, @id).to_html
           end
-          res.write FullThread.new(user, Integer($1)).to_html
-          res.write footer
           
         when %r{\A/moderate/(\d+)\z} # moderation
           user.moderate($1)

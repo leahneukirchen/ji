@@ -20,20 +20,24 @@ body {
 .nav {
   float: right;
   list-style-type: none;
-  margin: -4em 0.5em 1em 0;
+  margin: -2em 0.5em 1em 0;
   clear: both;
 }
 
 .nav form {
   display: inline;
+  margin: 0 1em 0 0;
 }
 
 .nav ul {
-  padding-bottom: 2.5em;
+  display: inline;
+  margin: 0;
+  padding: 0;
 }
 
 .nav li {
   display: inline;
+  margin: 0 0 0 0.5em;
 }
 
 .post, .reply {
@@ -144,35 +148,71 @@ body {
     <script src="http://ajax.googleapis.com/ajax/libs/jquery/1.3/jquery.min.js"></script>
 
     <script type="text/javascript">
-jQuery(function($) {
-  $(".moderated .content").toggle(function() {
-    $(this).parent().addClass("open")
+jQuery(function($$) {
+  $$(".moderated .content").toggle(function() {
+    $$(this).parent().addClass("open")
   }, function() {
-    $(this).parent().removeClass("open")
+    $$(this).parent().removeClass("open")
   })
 
-  $("a.replylink").click(function() {
-    $(".reply:has(textarea:empty)").remove()
-    $(this).parent().siblings(".children").prepend($('<li><form class="reply" method="POST" action="' + $(this).attr("href") + '" >\
+  $$("a.replylink").click(function() {
+    $$(".reply:has(textarea:empty)").remove()
+    $$(this).parent().siblings(".children").prepend($$('<li><form class="reply" method="POST" action="' + $$(this).attr("href") + '" >\
 <textarea name="content" cols=79 rows=15></textarea>\
 trip: <input type="password" name="tripcode">\
-<label><input type="checkbox" value="sage" #{sage && " checked"} name="sage"> No bump</label>\
+<label><input type="checkbox" value="sage" name="sage"> No bump</label>\
 <input type="submit" value="reply">\
 </form></li>'))
     return false;
   })
 
-  $(document.location.hash).addClass("selected")
+  $$(document.location.hash).addClass("selected")
 })
     </script>
   </head>
   <body>
-    <h1>$TITLE</h1>
+    <h1><a href="/$board">/$board — $title</a></h1>
 
     <div class="nav">
+
+$ if view == "overview"
+      <form method="POST" action="/login">
+        trip: <input type="password" name="tripcode" value="">
+        <input type="submit" value="log in">
+      </form>
+      <form method="POST" action="/logout">
+        <input type="submit" value="log out">
+      </form>
+$ end
+
       <ul>
         <li><a href="/" title="Ji">/</a></li>
         <li><a href="/a" title="Alternative">/a</a></li>
         <li><a href="/t" title="Testing Ji">/t</a></li>
       </ul>
     </div>
+
+$ if view == "thread" && req.query_string == "reply"
+  <p>Reply:</p>
+  <form class="reply" method="POST" action="/#{@id}" >
+  <textarea name="content" cols=79 rows=15></textarea>
+  trip: <input type="password" name="tripcode">
+  <label><input type="checkbox" value="sage" name="sage"> No bump</label>
+  <input type="submit" value="reply">
+  </form>
+$ end
+
+$:{block.call}
+
+$ if view == "overview" && board
+  <hr>
+  <p>Start new thread:</p>
+  <form class="reply" method="POST" action="/#{board}" >
+  <textarea name="content" cols=79 rows=15></textarea>
+  trip: <input type="password" name="tripcode">
+  <input type="submit" value="new thread">
+  </form>
+$ end
+
+  </body>
+</html>
