@@ -194,7 +194,7 @@ $ end
 
 $ if view == "thread" && req.query_string == "reply"
   <p>Reply:</p>
-  <form class="reply" method="POST" action="/#{@id}" >
+  <form class="reply" method="POST" action="/${@id}" >
   <textarea name="content" cols=79 rows=15></textarea>
   trip: <input type="password" name="tripcode">
   <label><input type="checkbox" value="sage" name="sage"> No bump</label>
@@ -207,7 +207,7 @@ $:{block.call}
 $ if view == "overview" && board
   <hr>
   <p>Start new thread:</p>
-  <form class="reply" method="POST" action="/#{board}" >
+  <form class="reply" method="POST" action="/${board}" >
   <textarea name="content" cols=79 rows=15></textarea>
   trip: <input type="password" name="tripcode">
   <input type="submit" value="new thread">
