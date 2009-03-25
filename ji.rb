@@ -385,7 +385,7 @@ EOF
     end
 
     def post(text, tripcode, board)
-      if user.can_post?
+      if can_post?
         new_post = Post.post(text, tripcode, board)
         self.last_trip = tripcode
         new_post
